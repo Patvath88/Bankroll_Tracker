@@ -126,3 +126,119 @@ else:
         }
         bet_id = add_bet(bet_data)
         st.success(f"Parlay added! ID #{bet_id}")
+import streamlit as st
+from storage import get_all_bets, delete_bet
+from datetime import datetime
+
+
+# -------------------------------------------------------------------
+# BET HISTORY SECTION
+# -------------------------------------------------------------------
+
+st.header("📜 Bet History")
+
+bets = get_all_bets()
+
+if not bets:
+    st.info("No bets added yet.")
+else:
+    for bet in sorted(bets, key=lambda x: x["timestamp"], reverse=True):
+
+        # ----------------------------
+        # HEADER ROW
+        # ----------------------------
+        with st.container():
+            st.markdown(
+                """
+                <style>
+                .bet-card {
+                    background-color: #0a0f24;
+                    padding: 18px;
+                    border-radius: 14px;
+                    margin-bottom: 18px;
+                    border: 1px solid #1e2a48;
+                }
+                .bet-header {
+                    font-size: 20px;
+                    font-weight: 700;
+                    color: white;
+                }
+                .bet-sub {
+                    font-size: 14px;
+                    color: #9bb0d4;
+                }
+                .bet-divider {
+                    border-bottom: 1px solid #1e2a48;
+                    margin-top: 10px;
+                    margin-bottom: 10px;
+                }
+                .leg-box {
+                    background-color: #131a33;
+                    padding: 10px;
+                    border-radius: 10px;
+                    margin-top: 8px;
+                    border: 1px solid #1e2a48;
+                }
+                </style>
+                """,
+                unsafe_allow_html=True
+            )
+
+            st.markdown("<div class='bet-card'>", unsafe_allow_html=True)
+
+            # ----------------------------
+            # TOP LINE (Bet Type + Sport + Date)
+            # ----------------------------
+            date = datetime.fromisoformat(bet["timestamp"]).strftime("%b %d, %Y %I:%M %p")
+            sport_display = bet["sport"] if bet["sport"] != "Multiple" else "Multi-Sport"
+
+            st.markdown(
+                f"""
+                <div class='bet-header'>{bet['type']} Bet — {sport_display}</div>
+                <div class='bet-sub'>{date}</div>
+                <div class='bet-divider'></div>
+                """,
+                unsafe_allow_html=True
+            )
+
+            # ----------------------------
+            # BET SUMMARY ROW
+            # ----------------------------
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                st.metric("Odds", bet["odds"])
+            with col2:
+                st.metric("Stake", f"${bet['stake']}")
+            with col3:
+                st.metric("To Win", f"${bet['to_win']}")
+            with col4:
+                st.metric("Payout", f"${bet['payout']}")
+
+            # ----------------------------
+            # PARLAY LEGS (expansion)
+            # ----------------------------
+            if bet["legs"]:
+                with st.expander("View Parlay Legs"):
+                    for idx, leg in enumerate(bet["legs"], start=1):
+                        st.markdown(
+                            f"""
+                            <div class='leg-box'>
+                                <b>Leg {idx}</b><br>
+                                {leg['player']} — {leg['prop']}<br>
+                                <i>{leg['type']} | Line: {leg['line']} | {leg['ou']}</i><br>
+                                {f"Odds: {leg['odds']}" if leg['odds'] else ""}
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+
+            # ----------------------------
+            # DELETE BUTTON
+            # ----------------------------
+            if st.button(f"Delete Bet #{bet['id']}", key=f"del_{bet['id']}"):
+                delete_bet(bet["id"])
+                st.warning(f"Bet #{bet['id']} deleted.")
+                st.rerun()
+
+            st.markdown("</div>", unsafe_allow_html=True)

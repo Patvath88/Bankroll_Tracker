@@ -2,98 +2,101 @@ import json
 import os
 from datetime import datetime
 
-DB_FILE = "bets_db.json"
+# -----------------------------
+# FILE PATHS
+# -----------------------------
+BET_DIR = "bets"
+BET_FILE = os.path.join(BET_DIR, "bets.json")
+BANKROLL_FILE = os.path.join(BET_DIR, "bankroll.json")
+
+# -----------------------------
+# ENSURE DIRECTORY EXISTS
+# -----------------------------
+if not os.path.exists(BET_DIR):
+    os.makedirs(BET_DIR)
+
+# -----------------------------
+# CREATE EMPTY BETS FILE IF MISSING
+# -----------------------------
+if not os.path.exists(BET_FILE):
+    with open(BET_FILE, "w") as f:
+        json.dump([], f, indent=4)
+
+# -----------------------------
+# CREATE BANKROLL FILE IF MISSING
+# -----------------------------
+if not os.path.exists(BANKROLL_FILE):
+    with open(BANKROLL_FILE, "w") as f:
+        json.dump({"bankroll": None}, f, indent=4)
 
 
-# ----------------------------------------------------------------------------
-# INTERNAL HELPERS
-# ----------------------------------------------------------------------------
+# =============================================================
+# BANKROLL FUNCTIONS
+# =============================================================
 
-def _initialize_db():
-    """Create the DB file if missing."""
-    if not os.path.exists(DB_FILE):
-        with open(DB_FILE, "w") as f:
-            json.dump({"bets": []}, f, indent=4)
-
-
-def _load():
-    """Load the DB JSON safely."""
-    _initialize_db()
+def get_bankroll():
+    """Load bankroll from bankroll.json"""
     try:
-        with open(DB_FILE, "r") as f:
+        with open(BANKROLL_FILE, "r") as f:
+            data = json.load(f)
+        return data.get("bankroll")
+    except:
+        return None
+
+
+def set_bankroll(amount):
+    """Save bankroll permanently"""
+    with open(BANKROLL_FILE, "w") as f:
+        json.dump({"bankroll": amount}, f, indent=4)
+
+
+# =============================================================
+# BET STORAGE FUNCTIONS
+# =============================================================
+
+def load_bets():
+    """Load all bets from bets.json"""
+    try:
+        with open(BET_FILE, "r") as f:
             return json.load(f)
-    except json.JSONDecodeError:
-        # Reset corrupted DB
-        with open(DB_FILE, "w") as f:
-            json.dump({"bets": []}, f, indent=4)
-        return {"bets": []}
+    except:
+        return []
 
 
-def _save(data):
-    """Save JSON to disk."""
-    with open(DB_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+def save_bets(bets):
+    """Save all bets back to bets.json"""
+    with open(BET_FILE, "w") as f:
+        json.dump(bets, f, indent=4)
 
 
-# ----------------------------------------------------------------------------
-# PUBLIC API
-# ----------------------------------------------------------------------------
-
-def get_all_bets():
-    """Return list of all bets."""
-    db = _load()
-    return db.get("bets", [])
+def generate_bet_id(bets):
+    """Create a unique bet ID"""
+    if not bets:
+        return 1
+    return max(b["id"] for b in bets) + 1
 
 
 def add_bet(bet_data):
-    """
-    Add a bet to the database.
-    bet_data = {
-        "id": auto,
-        "timestamp": now,
-        "sport": "...",
-        "type": "Straight/Parlay",
-        "odds": -110,
-        "stake": 50,
-        "to_win": 45.45,
-        "payout": 95.45,
-        "legs": [ {player, prop, type, line, ou} ],
-        "result": "Pending/Won/Lost/Pushed",
-    }
-    """
-    db = _load()
+    """Add a new bet and return its ID"""
+    bets = load_bets()
+    bet_id = generate_bet_id(bets)
 
-    new_id = 1
-    if db["bets"]:
-        new_id = max(b["id"] for b in db["bets"]) + 1
-
-    bet_data["id"] = new_id
+    bet_data["id"] = bet_id
     bet_data["timestamp"] = datetime.now().isoformat()
 
-    db["bets"].append(bet_data)
-    _save(db)
+    bets.append(bet_data)
+    save_bets(bets)
 
-    return new_id
-
-
-def delete_bet(bet_id: int):
-    """Remove bet by ID."""
-    db = _load()
-    db["bets"] = [b for b in db["bets"] if b["id"] != bet_id]
-    _save(db)
+    return bet_id
 
 
-def update_bet(bet_id: int, updated_fields: dict):
-    """Update any fields in a bet."""
-    db = _load()
-    for bet in db["bets"]:
-        if bet["id"] == bet_id:
-            bet.update(updated_fields)
-            break
-    _save(db)
+def delete_bet(bet_id):
+    """Remove bet by ID"""
+    bets = load_bets()
+    updated = [b for b in bets if b["id"] != bet_id]
+    save_bets(updated)
 
 
-def reset_all_bets():
-    """Wipe everything."""
-    _save({"bets": []})
-
+def get_all_bets():
+    """Return all saved bets"""
+    return load_bets()

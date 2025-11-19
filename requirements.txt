@@ -1,5 +1,6 @@
-streamlit>=1.36.0
-pandas>=2.2.0
-numpy>=1.26.0
-requests>=2.31.0
-python-dateutil>=2.9.0
+pytesseract
+pillow
+streamlit
+pandas
+numpy
+python-dateutil

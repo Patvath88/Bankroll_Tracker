@@ -1,6 +1,0 @@
-easyocr
-pillow
-streamlit
-pandas
-numpy
-python-dateutil

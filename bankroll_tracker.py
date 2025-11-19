@@ -6,6 +6,119 @@ from odds_engine import (
     calculate_kelly,
 )
 from storage import add_bet
+# -------------------------------------------------------------------
+# GLOBAL FAN DUEL UI STYLING
+# -------------------------------------------------------------------
+
+st.markdown("""
+<style>
+
+    /* GLOBAL BACKGROUND */
+    .stApp {
+        background-color: #0a0f24 !important;
+        color: #ffffff !important;
+    }
+
+    /* HEADERS */
+    h1, h2, h3, h4 {
+        color: #ffffff !important;
+        font-weight: 700 !important;
+    }
+
+    /* SUBHEADERS */
+    .stSubheader, .stMarkdown {
+        color: #d2d8e8 !important;
+    }
+
+    /* INPUT BOXES */
+    .stTextInput>div>div>input, 
+    .stNumberInput input,
+    .stSelectbox div[data-baseweb="select"] {
+        background-color: #131a33 !important;
+        color: #ffffff !important;
+        border: 1px solid #1e2a48 !important;
+        border-radius: 10px !important;
+    }
+
+    /* SELECTBOX DROPDOWN */
+    .css-11unzgr {
+        background-color: #131a33 !important;
+        color: white !important;
+    }
+
+    /* BUTTONS */
+    .stButton>button {
+        background-color: #14b8a6 !important;
+        color: #ffffff !important;
+        border-radius: 10px !important;
+        height: 45px;
+        font-size: 16px;
+        font-weight: bold;
+        border: none;
+        transition: 0.2s;
+    }
+    .stButton>button:hover {
+        background-color: #0d8f7d !important;
+        transform: scale(1.02);
+    }
+
+    /* METRIC CARDS */
+    [data-testid="stMetricLabel"] {
+        color: #9bb0d4 !important;
+    }
+    [data-testid="stMetricValue"] {
+        color: #ffffff !important;
+    }
+
+    /* CARDS */
+    .stat-card {
+        background-color: #131a33;
+        padding: 20px;
+        border-radius: 14px;
+        border: 1px solid #1e2a48;
+        margin-bottom: 15px;
+    }
+
+    /* TABLES */
+    .dataframe {
+        color: white !important;
+    }
+    .stDataFrame {
+        background-color: #0a0f24 !important;
+    }
+
+    /* EXPANDER */
+    .streamlit-expanderHeader {
+        font-size: 18px !important;
+        color: #14b8a6 !important;
+        font-weight: bold;
+        background-color: #131a33 !important;
+        border-radius: 10px;
+        border: 1px solid #1e2a48;
+    }
+    .streamlit-expanderHeader:hover {
+        background-color: #0f172a !important;
+    }
+
+    /* SCROLLBAR */
+    ::-webkit-scrollbar {
+        width: 8px;
+    }
+    ::-webkit-scrollbar-thumb {
+        background: #1e2a48;
+        border-radius: 10px;
+    }
+    ::-webkit-scrollbar-track {
+        background: #0a0f24;
+    }
+
+    /* DIVIDER */
+    hr {
+        border: 1px solid #1e2a48 !important;
+    }
+
+</style>
+""", unsafe_allow_html=True)
 
 
 # -------------------------------------------------------------------

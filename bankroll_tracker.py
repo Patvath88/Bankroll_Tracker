@@ -128,23 +128,40 @@ if submitted_manual:
 
 
 # ============================================================
-# NEW BETSLIP UPLOAD (OCR-POWERED IMPORT)
+# NEW BETSLIP UPLOAD USING EASYOCR (works on Streamlit Cloud)
 # ============================================================
 
-import pytesseract
+import easyocr
 from PIL import Image
+import numpy as np
 
-st.subheader("📸 Upload Bet Slip (Image/PDF)")
+st.subheader("📸 Upload Bet Slip (Image)")
 
 uploaded_betslip = st.file_uploader(
     "Upload your bet slip screenshot (JPG, PNG)", 
     type=["jpg", "jpeg", "png"]
 )
 
+# Load EasyOCR reader (cached so it doesn't reload every time)
+@st.cache_resource
+def load_reader():
+    return easyocr.Reader(['en'], gpu=False)
+
+reader = load_reader()
+
+
+def extract_text_easyocr(image):
+    """
+    Use EasyOCR to extract all text from a bet slip image.
+    """
+    img_array = np.array(image)
+    results = reader.readtext(img_array, detail=0)
+    return "\n".join(results)
+
+
 def parse_betslip_text(text):
     """
     Extracts basic betting details from OCR output.
-    Very simple rules — user can edit afterward.
     """
     lines = text.split("\n")
     result = {
@@ -159,24 +176,21 @@ def parse_betslip_text(text):
 
         # Find American odds
         if "+" in line_clean or "-" in line_clean:
-            try:
-                for token in line_clean.split():
+            for token in line_clean.split():
+                try:
                     if token.startswith("+") or token.startswith("-"):
                         result["Odds"] = int(token)
-            except:
-                pass
+                except:
+                    pass
 
         # Find stake
         if "stake" in line_clean.lower() or "$" in line_clean.lower():
-            try:
-                tokens = line_clean.replace("$", "").split()
-                for t in tokens:
-                    if t.replace(".", "").isdigit():
-                        result["Stake"] = float(t)
-            except:
-                pass
+            tokens = line_clean.replace("$", "").split()
+            for t in tokens:
+                if t.replace(".", "").isdigit():
+                    result["Stake"] = float(t)
 
-        # Player/team name guess = longest text line
+        # Guess player/team as longest non-numeric line
         if len(line_clean) > len(result["Player/Team"]) and not any(char.isdigit() for char in line_clean):
             result["Player/Team"] = line_clean
 
@@ -184,15 +198,12 @@ def parse_betslip_text(text):
 
 
 if uploaded_betslip:
-    st.info("Processing bet slip… extracting text…")
+    st.info("Extracting text from bet slip…")
 
-    # Read image
     image = Image.open(uploaded_betslip)
 
-    # OCR
-    extracted_text = pytesseract.image_to_string(image)
+    extracted_text = extract_text_easyocr(image)
 
-    # Parse
     parsed = parse_betslip_text(extracted_text)
 
     st.subheader("📝 Parsed Bet Details (Edit if needed)")

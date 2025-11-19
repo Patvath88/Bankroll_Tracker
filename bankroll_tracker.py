@@ -273,32 +273,79 @@ if uploaded_img:
 
 
 # =============================
-# BET HISTORY (CARD STYLE)
+# BET HISTORY — FANDUEL STYLE
 # =============================
 st.header("📜 Bet History")
 
 for idx, row in df.iterrows():
 
+    # Calculate To Win + Payout
     to_win, payout = calculate_odds(row["Stake"], row["Odds"])
 
-    st.markdown(f"""
-    <div style="
-        padding:18px;
-        margin-bottom:12px;
-        border-radius:12px;
-        background-color:#202020;
-        color:white;
-    ">
-      <h4>{row['Date']} — {row['Sport']} — {row['Bet Type']}</h4>
+    # Count legs if any
+    leg_count = 0
+    legs = []
+    if isinstance(row["LegsJSON"], str) and row["LegsJSON"].strip() != "":
+        legs = row["LegsJSON"].split(";")
+        leg_count = len(legs)
 
-      <b>Bet:</b> {row['Player/Team']}<br>
-      <b>Odds:</b> {row['Odds']}<br>
-      <b>Stake:</b> ${row['Stake']}<br>
-      <b>To Win:</b> ${to_win}<br>
-      <b>Payout:</b> ${payout}<br>
-      <b>Result:</b> {row['Result']}<br>
-      <b>Profit:</b> ${row['Profit']}<br><br>
-    """, unsafe_allow_html=True)
+    # COLLAPSED HEADER
+    with st.expander(
+        f"{row['Date']} • {row['Sport']} • {row['Bet Type']} "
+        f"{f'({leg_count} Legs)' if leg_count > 0 else ''}  |  "
+        f"Odds: {row['Odds']}  •  Stake: ${row['Stake']}  •  To Win: ${to_win}"
+    ):
+
+        # BETSLIP CARD
+        st.markdown(f"""
+        <div style="
+            background-color:#0d1b2a;
+            padding:20px;
+            border-radius:12px;
+            box-shadow: 0px 2px 10px rgba(0,0,0,0.35);
+            color:white;
+            font-size:16px;
+            line-height:1.5;
+        ">
+            <div style="font-size:22px; font-weight:700; color:#1A73E8; margin-bottom:10px;">
+                {row['Bet Type'].upper()} {f'— {leg_count} LEGS' if leg_count > 0 else ''}
+            </div>
+
+            <b>Odds:</b> {row['Odds']}<br>
+            <b>Stake:</b> ${row['Stake']}<br>
+            <b>To Win:</b> ${to_win}<br>
+            <b>Payout:</b> ${payout}<br>
+            <b>Result:</b> {row['Result']}<br>
+            <b>Profit:</b> ${row['Profit']}<br>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # PARLAY LEGS SECTION
+        if leg_count > 0:
+            st.markdown("""
+                <br><b style="font-size:18px;">Legs:</b><br>
+            """, unsafe_allow_html=True)
+
+            for i, leg in enumerate(legs, start=1):
+                st.markdown(f"""
+                <div style="
+                    background-color:#11263c;
+                    padding:10px 15px;
+                    margin-bottom:6px;
+                    border-left:4px solid #1A73E8;
+                    border-radius:6px;
+                    color:white;
+                ">
+                    <b>{i})</b> {leg}
+                </div>
+                """, unsafe_allow_html=True)
+
+        # DELETE BUTTON
+        if st.button(f"🗑 Delete Bet #{idx}", key=f"del_{idx}"):
+            df.drop(idx, inplace=True)
+            df.to_csv(DATA_FILE, index=False)
+            st.experimental_rerun()
+
 
     # ----- PARLAY LEGS -----
     if isinstance(row["LegsJSON"], str) and row["LegsJSON"] != "":

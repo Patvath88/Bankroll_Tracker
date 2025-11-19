@@ -128,162 +128,114 @@ if submitted_manual:
 
 
 # ============================================================
-# NEW FANDUEL IMPORTER (mobile API version)
+# NEW BETSLIP UPLOAD (OCR-POWERED IMPORT)
 # ============================================================
 
-st.subheader("🔁 Import FanDuel Bets (via Cookies)")
+import pytesseract
+from PIL import Image
 
-uploaded_cookies = st.file_uploader("Upload fanduel_cookies.json", type=["json"])
+st.subheader("📸 Upload Bet Slip (Image/PDF)")
 
+uploaded_betslip = st.file_uploader(
+    "Upload your bet slip screenshot (JPG, PNG)", 
+    type=["jpg", "jpeg", "png"]
+)
 
-def load_cookies(uploaded):
-    try:
-        cookies_raw = json.load(uploaded)
-        cookie_dict = {c["name"]: c["value"] for c in cookies_raw}
-        return cookie_dict
-    except Exception as e:
-        st.error(f"Error parsing cookies: {e}")
-        return None
-
-
-def create_mobile_session(cookies):
+def parse_betslip_text(text):
     """
-    Creates a requests session with FanDuel mobile headers & your cookies.
+    Extracts basic betting details from OCR output.
+    Very simple rules — user can edit afterward.
     """
-    s = requests.Session()
-
-    # Standard mobile headers (required)
-    s.headers.update({
-        "User-Agent": "FanDuel/2500 CFNetwork/1335.0.3 Darwin/21.6.0",
-        "Accept": "application/json",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Connection": "keep-alive",
-    })
-
-    # Add cookies (this DOES authenticate)
-    s.cookies.update(cookies)
-
-    return s
-
-
-def fetch_mobile_bets(session):
-    """
-    Fetch active + recent settled bets (last ~30 days) from mobile API.
-    """
-
-    ACTIVE_URL = "https://api.fanduel.com/bets/v1/users/me/active"
-    SETTLED_URL = "https://api.fanduel.com/bets/v1/users/me/settled?offset=0&count=200"
-
-    all_results = []
-
-    # ========================
-    # ACTIVE BETS
-    # ========================
-    try:
-        r = session.get(ACTIVE_URL)
-        if r.status_code == 200:
-            active_data = r.json().get("bets", [])
-            for bet in active_data:
-                all_results.append(process_mobile_bet(bet, "Active"))
-        else:
-            st.warning(f"Active request failed: HTTP {r.status_code}")
-    except Exception as e:
-        st.warning(f"Error fetching Active bets: {e}")
-
-    # ========================
-    # SETTLED BETS (200 max)
-    # ========================
-    try:
-        r = session.get(SETTLED_URL)
-        if r.status_code == 200:
-            settled_data = r.json().get("bets", [])
-
-            # Filter down to the last 30 days
-            recent_cutoff = datetime.now().timestamp() - (30 * 86400)
-            filtered = [
-                b for b in settled_data
-                if b.get("resultAwardedDate", 0) >= recent_cutoff
-            ]
-
-            for bet in filtered:
-                all_results.append(process_mobile_bet(bet, "Settled"))
-        else:
-            st.warning(f"Settled request failed: HTTP {r.status_code}")
-    except Exception as e:
-        st.warning(f"Error fetching Settled bets: {e}")
-
-    return all_results
-
-
-def process_mobile_bet(bet, bet_label):
-    """
-    Transform FanDuel mobile API bet structure into our table row.
-    """
-
-    desc = bet.get("description", "Unknown Bet")
-    stake = float(bet.get("stake", 0))
-    odds = int(bet.get("oddsAmerican", 0))
-
-    result_raw = bet.get("result", "").upper()
-    if result_raw == "WON":
-        result = "Win"
-    elif result_raw == "LOST":
-        result = "Loss"
-    elif result_raw == "PUSH":
-        result = "Push"
-    else:
-        result = "Pending"
-
-    # Profit calculation
-    if result == "Win":
-        profit = stake * (odds / 100) if odds > 0 else stake / (abs(odds) / 100)
-    elif result == "Loss":
-        profit = -stake
-    else:
-        profit = 0
-
-    return {
-        "Date": datetime.now().strftime("%Y-%m-%d"),
-        "Sport": "Auto",
-        "Bet Type": bet_label,
-        "Player/Team": desc,
-        "Odds": odds,
-        "Stake": stake,
-        "Result": result,
-        "Profit": profit,
-        "Imported": True
+    lines = text.split("\n")
+    result = {
+        "Player/Team": "",
+        "Odds": 0,
+        "Stake": 0,
+        "Bet Type": "Imported"
     }
 
+    for line in lines:
+        line_clean = line.strip()
 
-# ======================
-# TRIGGER IMPORT
-# ======================
-if uploaded_cookies:
-    cookies = load_cookies(uploaded_cookies)
+        # Find American odds
+        if "+" in line_clean or "-" in line_clean:
+            try:
+                for token in line_clean.split():
+                    if token.startswith("+") or token.startswith("-"):
+                        result["Odds"] = int(token)
+            except:
+                pass
 
-    if cookies:
-        st.info("Authenticating with FanDuel Mobile API…")
+        # Find stake
+        if "stake" in line_clean.lower() or "$" in line_clean.lower():
+            try:
+                tokens = line_clean.replace("$", "").split()
+                for t in tokens:
+                    if t.replace(".", "").isdigit():
+                        result["Stake"] = float(t)
+            except:
+                pass
 
-        session = create_mobile_session(cookies)
+        # Player/team name guess = longest text line
+        if len(line_clean) > len(result["Player/Team"]) and not any(char.isdigit() for char in line_clean):
+            result["Player/Team"] = line_clean
 
-        st.info("Fetching active + recent settled bets...")
-        bets = fetch_mobile_bets(session)
+    return result
 
-        if len(bets) > 0:
-            imported_df = pd.DataFrame(bets)
-            df = pd.concat([df, imported_df], ignore_index=True)
 
-            df.drop_duplicates(
-                subset=["Player/Team", "Stake", "Odds"],
-                keep="first",
-                inplace=True
-            )
+if uploaded_betslip:
+    st.info("Processing bet slip… extracting text…")
 
-            df.to_csv(DATA_FILE, index=False)
+    # Read image
+    image = Image.open(uploaded_betslip)
 
-            st.success(f"Imported {len(imported_df)} bets from FanDuel!")
+    # OCR
+    extracted_text = pytesseract.image_to_string(image)
+
+    # Parse
+    parsed = parse_betslip_text(extracted_text)
+
+    st.subheader("📝 Parsed Bet Details (Edit if needed)")
+    with st.form("parsed_bet_form"):
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            date = st.date_input("Date", datetime.today())
+            player_team = st.text_input("Player/Team", value=parsed["Player/Team"])
+        with col2:
+            odds = st.number_input("Odds", value=parsed["Odds"])
+            stake = st.number_input("Stake ($)", value=parsed["Stake"])
+        with col3:
+            bet_type = st.text_input("Bet Type", value="Imported")
+            result = st.selectbox("Result", ["Pending", "Win", "Loss", "Push"])
+
+        submitted_import = st.form_submit_button("Add Bet to Tracker")
+
+    if submitted_import:
+        if result == "Win":
+            profit = stake * (odds / 100) if odds > 0 else stake / (abs(odds) / 100)
+        elif result == "Loss":
+            profit = -stake
         else:
-            st.warning("No bets found. Cookies may be expired or no recent bets.")
+            profit = 0
+
+        new_row = {
+            "Date": str(date),
+            "Sport": "Auto",
+            "Bet Type": bet_type,
+            "Player/Team": player_team,
+            "Odds": odds,
+            "Stake": stake,
+            "Result": result,
+            "Profit": profit,
+            "Imported": True
+        }
+
+        df.loc[len(df)] = new_row
+        df.to_csv(DATA_FILE, index=False)
+
+        st.success("Bet Slip Imported Successfully!")
+
 
 
 # ============================================================

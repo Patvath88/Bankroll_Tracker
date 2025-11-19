@@ -32,13 +32,18 @@ else:
 # =============================
 
 def calculate_odds(stake, odds):
-    """Convert American odds → To Win + Payout"""
+    """Convert American odds → To Win + Payout (safe version)."""
+    if odds == 0 or stake == 0:
+        return 0.0, stake  # No odds yet → no calculations
+
     if odds > 0:
         to_win = stake * (odds / 100)
     else:
         to_win = stake * (100 / abs(odds))
+
     payout = stake + to_win
     return round(to_win, 2), round(payout, 2)
+
 
 
 def format_leg(line):
@@ -151,6 +156,7 @@ def parse_bet_slip(text):
 st.header("➕ Add Manual Bet")
 
 with st.form("manual_bet"):
+
     col1, col2, col3 = st.columns(3)
 
     with col1:
@@ -163,15 +169,20 @@ with st.form("manual_bet"):
         odds = st.number_input("Odds (American)", step=1)
         stake = st.number_input("Stake ($)", min_value=0.0, step=1.0)
 
+    # Auto payout calculation (safe)
+    to_win, payout = calculate_odds(stake, odds)
+
     with col3:
-        to_win, payout = calculate_odds(stake, odds)
         st.write(f"**To Win:** ${to_win}")
         st.write(f"**Payout:** ${payout}")
         result = st.selectbox("Result", ["Pending", "Win", "Loss", "Push"])
 
+    # THIS WAS MISSING
     submitted = st.form_submit_button("Add Bet")
 
+# ---- Process form submission ----
 if submitted:
+
     if result == "Win":
         profit = to_win
     elif result == "Loss":

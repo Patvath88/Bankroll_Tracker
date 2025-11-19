@@ -3,40 +3,40 @@ import pandas as pd
 import numpy as np
 import os
 from datetime import datetime
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.common.by import By
-import time
+import json
+import requests
+
+# ============================================================
+# DATA INITIALIZATION
+# ============================================================
 
 DATA_FILE = "bets.csv"
 
-# ------------------------------------
-# Load or initialize data
-# ------------------------------------
 if os.path.exists(DATA_FILE):
     df = pd.read_csv(DATA_FILE)
 else:
     df = pd.DataFrame(columns=[
-        "Date", "Sport", "Bet Type", "Player/Team", "Odds", 
+        "Date", "Sport", "Bet Type", "Player/Team", "Odds",
         "Stake", "Result", "Profit", "Imported"
     ])
     df.to_csv(DATA_FILE, index=False)
 
-
 st.set_page_config(page_title="Bankroll Tracker", layout="wide")
-st.title("🔥 Enhanced Sports Betting Bankroll Tracker")
+
+st.title("🔥 Advanced Sports Betting Bankroll Tracker + FanDuel Importer")
 
 
-# ------------------------------------
-# Sidebar – Bankroll Summary
-# ------------------------------------
+# ============================================================
+# SIDEBAR BANKROLL SUMMARY
+# ============================================================
+
 st.sidebar.header("📊 Bankroll Summary")
 
 total_profit = df["Profit"].sum()
-starting_bankroll = st.sidebar.number_input("Starting Bankroll", value=1000)
+starting_bankroll = st.sidebar.number_input("Starting Bankroll ($)", value=1000)
 
 bankroll = starting_bankroll + total_profit
+
 wins = df[df["Profit"] > 0].shape[0]
 losses = df[df["Profit"] < 0].shape[0]
 win_rate = (wins / max(1, wins + losses)) * 100
@@ -46,9 +46,10 @@ st.sidebar.metric("Total Profit", f"${total_profit:.2f}")
 st.sidebar.metric("Win Rate", f"{win_rate:.1f}%")
 
 
-# ------------------------------------
-# Unit Sizing Tools
-# ------------------------------------
+# ============================================================
+# UNIT SIZING TOOLS
+# ============================================================
+
 st.subheader("📐 Unit Sizing Tools")
 
 colU1, colU2, colU3 = st.columns(3)
@@ -60,25 +61,27 @@ with colU2:
 with colU3:
     fixed_unit = st.number_input("Fixed Unit Size ($)", value=25.0)
 
+
 def kelly_fraction(win_prob, odds):
+    """Kelly criterion fraction calculation."""
     decimal_odds = (odds / 100) + 1 if odds > 0 else (100 / abs(odds)) + 1
     p = win_prob / 100
-    b = decimal_odds - 1  
+    b = decimal_odds - 1
     return (b * p - (1 - p)) / b
 
-def recommend_stake(odds):
-    k_fraction = kelly_fraction(kelly_win_prob, odds)
-    k_fraction = max(0, k_fraction)
 
+def recommend_stakes(odds):
+    """Returns (kelly stake, risk %, fixed unit)."""
+    k_fraction = max(0, kelly_fraction(kelly_win_prob, odds))
     kelly_stake = bankroll * k_fraction
     risk_percent_stake = bankroll * (kelly_edge / 100)
-
     return kelly_stake, risk_percent_stake, fixed_unit
 
 
-# ------------------------------------
-# Manual Bet Entry
-# ------------------------------------
+# ============================================================
+# MANUAL BET ENTRY
+# ============================================================
+
 st.subheader("➕ Add Manual Bet")
 
 with st.form("manual_bet"):
@@ -121,49 +124,57 @@ if submitted_manual:
 
     df = df.append(new_row, ignore_index=True)
     df.to_csv(DATA_FILE, index=False)
-    st.success("Bet Added!")
+    st.success("Manual Bet Added!")
 
 
-# ------------------------------------
-# FanDuel Auto-Importer
-# ------------------------------------
-st.subheader("🔁 Import Bets from FanDuel (Manual Login via Chrome)")
+# ============================================================
+# FAN DUEL COOKIE IMPORTER (ACTIVE + SETTLED)
+# ============================================================
 
-if st.button("Start FanDuel Importer"):
-    st.info("Launching Chrome... please log into FanDuel manually.")
+st.subheader("🔁 Import FanDuel Bets (via Cookies)")
 
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()))
-    driver.get("https://sportsbook.fanduel.com/my-bets")
-    driver.maximize_window()
+uploaded_cookies = st.file_uploader("Upload fanduel_cookies.json", type=["json"])
 
-    st.warning("⚠️ Please log in to FanDuel.\nOnce logged in, stay on the 'My Bets' page.")
-    time.sleep(15)
 
-    # Scrape both Settled and Active
-    bet_entries = []
-
+def load_cookies(uploaded):
     try:
-        time.sleep(3)
-        bets = driver.find_elements(By.CLASS_NAME, "bet-item")
+        cookies_raw = json.load(uploaded)
+        return {c["name"]: c["value"] for c in cookies_raw}
+    except Exception as e:
+        st.error(f"Error parsing cookies: {e}")
+        return None
 
-        for b in bets:
-            try:
-                text = b.text.split("\n")
-                date = datetime.today().strftime("%Y-%m-%d")
-                desc = text[0]
-                stake_line = [x for x in text if "Stake" in x][0]
-                odds_line = [x for x in text if "@" in x][0]
 
-                stake = float(stake_line.replace("Stake: $", ""))
-                odds = int(odds_line.split("@")[1])
+def fetch_fanduel_bets(cookies):
+    session = requests.Session()
+    session.headers.update({"User-Agent": "Mozilla/5.0"})
 
-                # Determine result
-                if "Won" in text:
-                    result = "Win"
-                elif "Lost" in text:
-                    result = "Loss"
-                else:
-                    result = "Pending"
+    # Set cookies
+    session.cookies.update(cookies)
+
+    # ============= Active Bets =============
+    active_url = "https://sportsbook.fanduel.com/api/bets/active"
+    settled_url = "https://sportsbook.fanduel.com/api/bets/settled"
+
+    all_bets = []
+
+    for url, label in [(active_url, "Active"), (settled_url, "Settled")]:
+        try:
+            r = session.get(url)
+            if r.status_code != 200:
+                continue
+
+            data = r.json().get("bets", [])
+
+            for b in data:
+                desc = b.get("description", "N/A")
+                stake = float(b.get("stake", 0))
+                odds = int(b.get("oddsAmerican", 0))
+                result = (
+                    "Win" if b.get("result") == "WON" else
+                    "Loss" if b.get("result") == "LOST" else
+                    "Pending"
+                )
 
                 if result == "Win":
                     profit = stake * (odds / 100) if odds > 0 else stake / (abs(odds) / 100)
@@ -172,10 +183,10 @@ if st.button("Start FanDuel Importer"):
                 else:
                     profit = 0
 
-                bet_entries.append({
-                    "Date": date,
+                all_bets.append({
+                    "Date": datetime.today().strftime("%Y-%m-%d"),
                     "Sport": "Auto",
-                    "Bet Type": "Imported",
+                    "Bet Type": label,
                     "Player/Team": desc,
                     "Odds": odds,
                     "Stake": stake,
@@ -184,37 +195,47 @@ if st.button("Start FanDuel Importer"):
                     "Imported": True
                 })
 
-            except:
-                pass
+        except Exception as e:
+            st.warning(f"Error fetching {label} bets: {e}")
 
-        driver.quit()
+    return all_bets
 
-        if bet_entries:
-            imported_df = pd.DataFrame(bet_entries)
+
+if uploaded_cookies:
+    cookies = load_cookies(uploaded_cookies)
+
+    if cookies:
+        st.info("Fetching FanDuel bets...")
+
+        bets = fetch_fanduel_bets(cookies)
+
+        if len(bets) > 0:
+            imported_df = pd.DataFrame(bets)
+
             df = pd.concat([df, imported_df], ignore_index=True)
+
             df.drop_duplicates(subset=["Player/Team", "Stake", "Odds"], keep="first", inplace=True)
+
             df.to_csv(DATA_FILE, index=False)
 
             st.success(f"Imported {len(imported_df)} FanDuel bets!")
 
         else:
-            st.warning("No bets found or scraper could not read the layout.")
-
-    except Exception as e:
-        st.error(f"Scraper error: {e}")
-        driver.quit()
+            st.warning("No bets found. Are your cookies still valid?")
 
 
-# ------------------------------------
-# Bet History
-# ------------------------------------
+# ============================================================
+# BET HISTORY TABLE
+# ============================================================
+
 st.subheader("📜 Bet History")
 st.dataframe(df)
 
 
-# ------------------------------------
-# Profit Trend Chart
-# ------------------------------------
+# ============================================================
+# PROFIT GRAPH
+# ============================================================
+
 if not df.empty:
     df_graph = df.copy()
     df_graph["Date"] = pd.to_datetime(df_graph["Date"])

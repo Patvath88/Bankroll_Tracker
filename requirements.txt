@@ -1,4 +1,4 @@
-pytesseract
+easyocr
 pillow
 streamlit
 pandas

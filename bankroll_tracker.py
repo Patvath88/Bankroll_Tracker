@@ -128,7 +128,7 @@ if submitted_manual:
 
 
 # ============================================================
-# FAN DUEL COOKIE IMPORTER (ACTIVE + SETTLED)
+# NEW FANDUEL IMPORTER (mobile API version)
 # ============================================================
 
 st.subheader("🔁 Import FanDuel Bets (via Cookies)")
@@ -139,89 +139,151 @@ uploaded_cookies = st.file_uploader("Upload fanduel_cookies.json", type=["json"]
 def load_cookies(uploaded):
     try:
         cookies_raw = json.load(uploaded)
-        return {c["name"]: c["value"] for c in cookies_raw}
+        cookie_dict = {c["name"]: c["value"] for c in cookies_raw}
+        return cookie_dict
     except Exception as e:
         st.error(f"Error parsing cookies: {e}")
         return None
 
 
-def fetch_fanduel_bets(cookies):
-    session = requests.Session()
-    session.headers.update({"User-Agent": "Mozilla/5.0"})
+def create_mobile_session(cookies):
+    """
+    Creates a requests session with FanDuel mobile headers & your cookies.
+    """
+    s = requests.Session()
 
-    # Set cookies
-    session.cookies.update(cookies)
+    # Standard mobile headers (required)
+    s.headers.update({
+        "User-Agent": "FanDuel/2500 CFNetwork/1335.0.3 Darwin/21.6.0",
+        "Accept": "application/json",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Connection": "keep-alive",
+    })
 
-    # ============= Active Bets =============
-    active_url = "https://sportsbook.fanduel.com/api/bets/active"
-    settled_url = "https://sportsbook.fanduel.com/api/bets/settled"
+    # Add cookies (this DOES authenticate)
+    s.cookies.update(cookies)
 
-    all_bets = []
-
-    for url, label in [(active_url, "Active"), (settled_url, "Settled")]:
-        try:
-            r = session.get(url)
-            if r.status_code != 200:
-                continue
-
-            data = r.json().get("bets", [])
-
-            for b in data:
-                desc = b.get("description", "N/A")
-                stake = float(b.get("stake", 0))
-                odds = int(b.get("oddsAmerican", 0))
-                result = (
-                    "Win" if b.get("result") == "WON" else
-                    "Loss" if b.get("result") == "LOST" else
-                    "Pending"
-                )
-
-                if result == "Win":
-                    profit = stake * (odds / 100) if odds > 0 else stake / (abs(odds) / 100)
-                elif result == "Loss":
-                    profit = -stake
-                else:
-                    profit = 0
-
-                all_bets.append({
-                    "Date": datetime.today().strftime("%Y-%m-%d"),
-                    "Sport": "Auto",
-                    "Bet Type": label,
-                    "Player/Team": desc,
-                    "Odds": odds,
-                    "Stake": stake,
-                    "Result": result,
-                    "Profit": profit,
-                    "Imported": True
-                })
-
-        except Exception as e:
-            st.warning(f"Error fetching {label} bets: {e}")
-
-    return all_bets
+    return s
 
 
+def fetch_mobile_bets(session):
+    """
+    Fetch active + recent settled bets (last ~30 days) from mobile API.
+    """
+
+    ACTIVE_URL = "https://api.fanduel.com/bets/v1/users/me/active"
+    SETTLED_URL = "https://api.fanduel.com/bets/v1/users/me/settled?offset=0&count=200"
+
+    all_results = []
+
+    # ========================
+    # ACTIVE BETS
+    # ========================
+    try:
+        r = session.get(ACTIVE_URL)
+        if r.status_code == 200:
+            active_data = r.json().get("bets", [])
+            for bet in active_data:
+                all_results.append(process_mobile_bet(bet, "Active"))
+        else:
+            st.warning(f"Active request failed: HTTP {r.status_code}")
+    except Exception as e:
+        st.warning(f"Error fetching Active bets: {e}")
+
+    # ========================
+    # SETTLED BETS (200 max)
+    # ========================
+    try:
+        r = session.get(SETTLED_URL)
+        if r.status_code == 200:
+            settled_data = r.json().get("bets", [])
+
+            # Filter down to the last 30 days
+            recent_cutoff = datetime.now().timestamp() - (30 * 86400)
+            filtered = [
+                b for b in settled_data
+                if b.get("resultAwardedDate", 0) >= recent_cutoff
+            ]
+
+            for bet in filtered:
+                all_results.append(process_mobile_bet(bet, "Settled"))
+        else:
+            st.warning(f"Settled request failed: HTTP {r.status_code}")
+    except Exception as e:
+        st.warning(f"Error fetching Settled bets: {e}")
+
+    return all_results
+
+
+def process_mobile_bet(bet, bet_label):
+    """
+    Transform FanDuel mobile API bet structure into our table row.
+    """
+
+    desc = bet.get("description", "Unknown Bet")
+    stake = float(bet.get("stake", 0))
+    odds = int(bet.get("oddsAmerican", 0))
+
+    result_raw = bet.get("result", "").upper()
+    if result_raw == "WON":
+        result = "Win"
+    elif result_raw == "LOST":
+        result = "Loss"
+    elif result_raw == "PUSH":
+        result = "Push"
+    else:
+        result = "Pending"
+
+    # Profit calculation
+    if result == "Win":
+        profit = stake * (odds / 100) if odds > 0 else stake / (abs(odds) / 100)
+    elif result == "Loss":
+        profit = -stake
+    else:
+        profit = 0
+
+    return {
+        "Date": datetime.now().strftime("%Y-%m-%d"),
+        "Sport": "Auto",
+        "Bet Type": bet_label,
+        "Player/Team": desc,
+        "Odds": odds,
+        "Stake": stake,
+        "Result": result,
+        "Profit": profit,
+        "Imported": True
+    }
+
+
+# ======================
+# TRIGGER IMPORT
+# ======================
 if uploaded_cookies:
     cookies = load_cookies(uploaded_cookies)
 
     if cookies:
-        st.info("Fetching FanDuel bets...")
+        st.info("Authenticating with FanDuel Mobile API…")
 
-        bets = fetch_fanduel_bets(cookies)
+        session = create_mobile_session(cookies)
+
+        st.info("Fetching active + recent settled bets...")
+        bets = fetch_mobile_bets(session)
 
         if len(bets) > 0:
             imported_df = pd.DataFrame(bets)
-
             df = pd.concat([df, imported_df], ignore_index=True)
 
-            df.drop_duplicates(subset=["Player/Team", "Stake", "Odds"], keep="first", inplace=True)
+            df.drop_duplicates(
+                subset=["Player/Team", "Stake", "Odds"],
+                keep="first",
+                inplace=True
+            )
 
             df.to_csv(DATA_FILE, index=False)
 
-            st.success(f"Imported {len(imported_df)} FanDuel bets!")
-
+            st.success(f"Imported {len(imported_df)} bets from FanDuel!")
         else:
-            st.warning("No bets found. Are your cookies still valid?")
+            st.warning("No bets found. Cookies may be expired or no recent bets.")
 
 
 # ============================================================

@@ -242,3 +242,139 @@ else:
                 st.rerun()
 
             st.markdown("</div>", unsafe_allow_html=True)
+import pandas as pd
+import streamlit as st
+from storage import get_all_bets
+import plotly.express as px
+from datetime import datetime
+
+
+# -------------------------------------------------------------------
+# ANALYTICS SECTION
+# -------------------------------------------------------------------
+
+st.header("📈 Analytics Dashboard")
+
+bets = get_all_bets()
+
+if not bets:
+    st.info("Add some bets to see your analytics.")
+else:
+    # Convert JSON list → DataFrame
+    df = pd.DataFrame(bets)
+
+    # Fix numeric columns
+    df["stake"] = df["stake"].astype(float)
+    df["payout"] = df["payout"].astype(float)
+    df["to_win"] = df["to_win"].astype(float)
+    df["odds"] = df["odds"].astype(float)
+
+    # Date parsing
+    df["date"] = pd.to_datetime(df["timestamp"]).dt.date
+
+    # --------------------
+    # CALCULATE PROFIT
+    # --------------------
+    def compute_profit(row):
+        if row["result"] == "Pending":
+            return 0
+        if row["result"] == "Won":
+            return row["payout"] - row["stake"]
+        if row["result"] == "Lost":
+            return -row["stake"]
+        if row["result"] == "Push":
+            return 0
+        return 0
+
+    df["profit"] = df.apply(compute_profit, axis=1)
+
+    # --------------------
+    # SUMMARY METRICS
+    # --------------------
+    total_profit = round(df["profit"].sum(), 2)
+    total_staked = round(df["stake"].sum(), 2)
+    roi = round((total_profit / total_staked * 100), 2) if total_staked > 0 else 0
+    units = round(total_profit / 100, 2)
+    win_rate = round((len(df[df["result"] == "Won"]) / len(df[df["result"] != "Pending"])) * 100, 2) \
+        if len(df[df["result"] != "Pending"]) > 0 else 0
+
+    # KPI DASHBOARD
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("🔥 Total Profit", f"${total_profit}")
+    m2.metric("📊 ROI", f"{roi}%")
+    m3.metric("🏆 Units Won", f"{units}u")
+    m4.metric("🎯 Hit Rate", f"{win_rate}%")
+
+    st.divider()
+
+    # --------------------
+    # SPORT BREAKDOWN
+    # --------------------
+    st.subheader("🏅 Profit by Sport")
+
+    by_sport = df.groupby("sport")["profit"].sum().reset_index()
+    fig = px.bar(by_sport, x="sport", y="profit", color="sport",
+                 color_discrete_sequence=px.colors.qualitative.Vivid)
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    # --------------------
+    # DAILY PROFIT TREND
+    # --------------------
+    st.subheader("📆 Daily Profit Over Time")
+
+    daily = df.groupby("date")["profit"].sum().reset_index()
+    fig2 = px.line(daily, x="date", y="profit", markers=True)
+    st.plotly_chart(fig2, use_container_width=True)
+
+    st.divider()
+
+    # --------------------
+    # ODDS DISTRIBUTION
+    # --------------------
+    st.subheader("🎲 Odds Distribution")
+
+    fig3 = px.histogram(df, x="odds", nbins=40, title="American Odds Distribution")
+    st.plotly_chart(fig3, use_container_width=True)
+
+    st.divider()
+
+    # --------------------
+    # AVERAGES
+    # --------------------
+    st.subheader("📌 Averages")
+
+    avg_stake = df["stake"].mean().round(2)
+    avg_odds = df["odds"].mean().round(2)
+
+    c1, c2 = st.columns(2)
+    c1.metric("💵 Average Stake", f"${avg_stake}")
+    c2.metric("📉 Average Odds", avg_odds)
+
+    st.divider()
+
+    # --------------------
+    # BEST SPORT
+    # --------------------
+    best_sport = by_sport.loc[by_sport["profit"].idxmax()]["sport"]
+    st.success(f"🏅 **Most Profitable Sport:** {best_sport}")
+
+    # --------------------
+    # FILTERS
+    # --------------------
+    st.subheader("🔍 Filter Bets")
+
+    f1, f2 = st.columns(2)
+    filter_type = f1.selectbox("Type Filter", ["All", "Straight", "Parlay"])
+    filter_sport = f2.selectbox("Sport Filter", ["All"] + sorted(df["sport"].unique()))
+
+    df_filtered = df.copy()
+
+    if filter_type != "All":
+        df_filtered = df_filtered[df_filtered["type"] == filter_type]
+
+    if filter_sport != "All":
+        df_filtered = df_filtered[df_filtered["sport"] == filter_sport]
+
+    st.dataframe(df_filtered[["date", "sport", "type", "stake", "odds", "payout", "profit"]])
